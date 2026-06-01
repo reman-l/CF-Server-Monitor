@@ -140,33 +140,37 @@ get_http_ping() {
 }
 
 get_tcp_ping() {
-    local host="$1"
+    local host="${1:-}"
     local port="${2:-443}"
+    local scheme="http"
+    local timing
 
-    local start_ms=0
-    local end_ms=0
-
-    start_ms=$(date +%s 2>/dev/null || echo 0)
-
-    if command -v timeout >/dev/null 2>&1; then
-        timeout 5 bash -c "exec 3<>/dev/tcp/${host}/${port}" >/dev/null 2>&1
-    else
-        bash -c "exec 3<>/dev/tcp/${host}/${port}" >/dev/null 2>&1
-    fi
-
-    local ret=$?
-
-    end_ms=$(date +%s 2>/dev/null || echo 0)
-
-    if [ "$ret" -ne 0 ]; then
-        echo "-1"
+    if [ -z "${host}" ]; then
+        echo "0"
         return
     fi
 
-    awk -v s="$start_ms" -v e="$end_ms" 'BEGIN{
-        d=(e-s)*1000
-        if(d<0)d=0
-        printf "%.0f\n", d
+    if [ "${port}" = "443" ]; then
+        scheme="https"
+    fi
+
+    timing=$(curl -k -o /dev/null -s \
+        --connect-timeout 2 \
+        --max-time 3 \
+        -w "%{time_namelookup} %{time_connect}" \
+        "${scheme}://${host}:${port}/" 2>/dev/null || true)
+
+    awk -v t="${timing}" 'BEGIN{
+        split(t, a, " ")
+        dns = a[1] + 0
+        conn = a[2] + 0
+        if (conn <= 0 || conn < dns) {
+            print 0
+            exit
+        }
+        ms = int((conn - dns) * 1000 + 0.5)
+        if (ms < 1) ms = 1
+        print ms
     }'
 }
 
@@ -185,6 +189,18 @@ get_ping() {
 CT_NODES=("gd-ct-dualstack.ip.zstaticcdn.com")
 CU_NODES=("gd-cu-dualstack.ip.zstaticcdn.com")
 CM_NODES=("gd-cm-dualstack.ip.zstaticcdn.com")
+
+pick_node() {
+    local nodes=("$@")
+    local count=${#nodes[@]}
+
+    if [ "${count}" -eq 0 ]; then
+        echo ""
+        return
+    fi
+
+    echo "${nodes[$((RANDOM % count))]}"
+}
 
 # ==============================================================================
 # 高并发/无竞态后台网络 Worker 协程
@@ -207,10 +223,9 @@ run_network_worker() {
         
         # 30秒检测一次网络延迟
         if [ $((now - last_ping)) -ge 30 ] || [ "$last_ping" -eq 0 ]; then
-            local rand_idx=$((RANDOM % 3))
-            get_ping "${CT_NODES[$rand_idx]}" > /dev/shm/.cf_ping_ct.tmp && mv /dev/shm/.cf_ping_ct.tmp /dev/shm/.cf_ping_ct || true
-            get_ping "${CU_NODES[$rand_idx]}" > /dev/shm/.cf_ping_cu.tmp && mv /dev/shm/.cf_ping_cu.tmp /dev/shm/.cf_ping_cu || true
-            get_ping "${CM_NODES[$rand_idx]}" > /dev/shm/.cf_ping_cm.tmp && mv /dev/shm/.cf_ping_cm.tmp /dev/shm/.cf_ping_cm || true
+            get_ping "$(pick_node "${CT_NODES[@]}")" > /dev/shm/.cf_ping_ct.tmp && mv /dev/shm/.cf_ping_ct.tmp /dev/shm/.cf_ping_ct || true
+            get_ping "$(pick_node "${CU_NODES[@]}")" > /dev/shm/.cf_ping_cu.tmp && mv /dev/shm/.cf_ping_cu.tmp /dev/shm/.cf_ping_cu || true
+            get_ping "$(pick_node "${CM_NODES[@]}")" > /dev/shm/.cf_ping_cm.tmp && mv /dev/shm/.cf_ping_cm.tmp /dev/shm/.cf_ping_cm || true
             get_ping "lf3-ips.zstaticcdn.com" > /dev/shm/.cf_ping_bd.tmp && mv /dev/shm/.cf_ping_bd.tmp /dev/shm/.cf_ping_bd || true
             last_ping="$now"
         fi
