@@ -1,11 +1,9 @@
-import { getLatestMetricsForAllServers, getAllServers } from '../database/schema.js';
+import { getLatestMetricsForAllServers } from '../database/schema.js';
+import { getAllServers } from '../utils/cache.js';
+import { loadSiteSettings, clearSiteSettingsCache } from '../utils/settings.js';
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
-
-let cachedSettings = null;
-let cacheExpiry = 0;
-const CACHE_TTL = 60 * 1000;
 
 async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
   for (let i = 0; i < retries; i++) {
@@ -25,48 +23,6 @@ async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
     }
   }
   throw new Error('Max retries exceeded');
-}
-
-async function loadNotificationSettings(db) {
-  const now = Date.now();
-  if (cachedSettings && now < cacheExpiry) {
-    return cachedSettings;
-  }
-
-  const defaults = { tg_notify: 'false', tg_bot_token: '', tg_chat_id: '' };
-
-  try {
-    const row = await db.prepare(
-      "SELECT value FROM settings WHERE key = 'site_options'"
-    ).first();
-
-    if (row) {
-      try {
-        const parsed = JSON.parse(row.value);
-        const settings = {
-          tg_notify: parsed.tg_notify || defaults.tg_notify,
-          tg_bot_token: parsed.tg_bot_token || defaults.tg_bot_token,
-          tg_chat_id: parsed.tg_chat_id || defaults.tg_chat_id
-        };
-        cachedSettings = settings;
-        cacheExpiry = now + CACHE_TTL;
-        return settings;
-      } catch (e) {
-        // JSON 解析失败，降级到独立 key
-      }
-    }
-  } catch (e) {
-    console.error('加载通知设置失败:', e);
-  }
-
-  cachedSettings = defaults;
-  cacheExpiry = now + CACHE_TTL;
-  return defaults;
-}
-
-export function clearNotificationSettingsCache() {
-  cachedSettings = null;
-  cacheExpiry = 0;
 }
 
 export async function sendTelegramNotification(settings, msg) {
@@ -105,8 +61,31 @@ export async function sendWeworkNotification(settings, msg) {
 }
 
 export async function checkOfflineNodes(db) {
-  const notifySettings = await loadNotificationSettings(db);
+  const notifySettings = await loadSiteSettings(db);
+
   if (notifySettings.tg_notify !== 'true') return;
+
+  const skipCount = parseInt(notifySettings.cleanup_skip_count || '0', 10) || 0;
+  console.log(`[Cron] 检测到当前跳过次数: ${skipCount}`);
+  if (skipCount > 0) {
+    console.log(`[Cron] 检测到表轮换进行中，跳过离线检测（剩余跳过次数: ${6 - skipCount}）`);
+    
+    const newCount = skipCount + 1;
+    const finalCount = newCount > 5 ? 0 : newCount;
+    
+    const siteOptionsResult = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('site_options').first();
+    const siteOptions = siteOptionsResult && siteOptionsResult.value && siteOptionsResult.value.length > 0 
+      ? JSON.parse(siteOptionsResult.value) 
+      : {};
+    siteOptions.cleanup_skip_count = String(finalCount);
+    await db.prepare(
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+    ).bind('site_options', JSON.stringify(siteOptions)).run();
+    
+    clearSiteSettingsCache();
+    return;
+  }
+
   
   try {
     const allServers = await getAllServers(db);

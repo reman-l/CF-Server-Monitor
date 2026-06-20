@@ -123,7 +123,12 @@ const statusText = computed(() => isOnline.value ? trans.value.online : trans.va
 
 const cpuPercent = computed(() => parseFloat(props.server.cpu || 0).toFixed(1))
 const ramPercent = computed(() => parseFloat(props.server.ram || 0).toFixed(1))
-const diskPercent = computed(() => parseFloat(props.server.disk || 0).toFixed(1))
+const diskPercent = computed(() => {
+  if (props.server.disk_total > 0) {
+    return ((props.server.disk_used / props.server.disk_total) * 100).toFixed(2)
+  }
+  return '0.00'
+})
 
 const trafficUsagePercent = computed(() => {
   const limit = parseFloat(props.server.traffic_limit) || 0

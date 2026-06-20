@@ -1,5 +1,5 @@
 const APPEARANCE_FIELDS = ['site_title', 'custom_bg', 'custom_head', 'custom_script'];
-const SITE_FIELDS = ['is_public', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'turnstile_enabled', 'turnstile_site_key', 'turnstile_secret_key', 'jwt_secret', 'username', 'password', 'custom_ct', 'custom_cu', 'custom_cm', 'custom_bd'];
+const SITE_FIELDS = ['is_public', 'show_price', 'show_expire', 'show_bw', 'show_tf', 'show_long_history', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'turnstile_enabled', 'turnstile_site_key', 'turnstile_secret_key', 'jwt_secret', 'username', 'password', 'cloudflare_account_id', 'cloudflare_token', 'custom_ct', 'custom_cu', 'custom_cm', 'custom_bd', 'cleanup_skip_count'];
 
 const defaults = {
   site_title: 'Cloudflare Server Monitor',
@@ -11,12 +11,16 @@ const defaults = {
   show_expire: 'true',
   show_bw: 'true',
   show_tf: 'true',
+  show_long_history: 'false',
   tg_notify: 'false',
   tg_bot_token: '',
   tg_chat_id: '',
+  cleanup_skip_count: '0',
   turnstile_enabled: 'false',
   turnstile_site_key: '',
   turnstile_secret_key: '',
+  cloudflare_account_id: '',
+  cloudflare_token: '',
   custom_ct: 'gd-ct-dualstack.ip.zstaticcdn.com',
   custom_cu: 'gd-cu-dualstack.ip.zstaticcdn.com',
   custom_cm: 'gd-cm-dualstack.ip.zstaticcdn.com',
@@ -32,7 +36,18 @@ function tryParseJSON(str) {
   }
 }
 
+const SITE_SETTINGS_TTL = 60 * 1000;
+let cachedSiteSettings = null;
+let siteSettingsCacheExpiry = 0;
+
 export async function loadSiteSettings(db) {
+  const now = Date.now();
+  if (cachedSiteSettings && now < siteSettingsCacheExpiry) {
+    console.log('读取site settings缓存');
+    return cachedSiteSettings;
+  }
+  console.log('从数据库加载site settings');
+
   const result = { ...defaults };
   let hasSite = false;
 
@@ -66,7 +81,14 @@ export async function loadSiteSettings(db) {
     console.error('加载站点设置失败:', e);
   }
 
+  cachedSiteSettings = result;
+  siteSettingsCacheExpiry = now + SITE_SETTINGS_TTL;
   return result;
+}
+
+export function clearSiteSettingsCache() {
+  cachedSiteSettings = null;
+  siteSettingsCacheExpiry = 0;
 }
 
 export async function loadSettings(db) {
