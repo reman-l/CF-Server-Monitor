@@ -6,7 +6,8 @@ import {
   setMetricsHistoryCache,
   getCacheDuration
 } from '../utils/cache.js';
-import { clearSiteSettingsCache } from '../utils/settings.js';
+import { saveSiteOptions, debug } from '../utils/settings.js';
+import { addHistoryColumns } from './updateDatabase.js';
 
 let dbInitialized = false;
 
@@ -32,6 +33,7 @@ export async function initDatabase(db) {
         traffic_limit TEXT DEFAULT '',
         traffic_calc_type TEXT DEFAULT 'total',
         reset_day INTEGER DEFAULT 1,
+        collect_interval INTEGER DEFAULT 0,
         report_interval INTEGER DEFAULT 60,
         ping_mode TEXT DEFAULT 'http',
         is_hidden TEXT DEFAULT '0',
@@ -45,8 +47,6 @@ export async function initDatabase(db) {
         server_id TEXT NOT NULL,
         timestamp INTEGER DEFAULT 0,
         cpu REAL DEFAULT 0,
-        ram REAL DEFAULT 0,
-        disk REAL DEFAULT 0,
         load_avg TEXT DEFAULT '0',
         net_in_speed REAL DEFAULT 0,
         net_out_speed REAL DEFAULT 0,
@@ -75,7 +75,7 @@ export async function initDatabase(db) {
         gpu_info TEXT DEFAULT '',
         arch TEXT DEFAULT '',
         os TEXT DEFAULT '',
-        country TEXT DEFAULT '',
+        region TEXT DEFAULT '',
         ip_v4 TEXT DEFAULT '0',
         ip_v6 TEXT DEFAULT '0',
         boot_time TEXT DEFAULT '',
@@ -90,7 +90,7 @@ export async function initDatabase(db) {
       ON metrics_history(server_id, timestamp)
     `).run();
 
-    console.log('✅ 数据库初始化完成');
+    debug('✅ 数据库初始化完成');
     dbInitialized = true;
   } catch (e) {
     console.error('❌ 数据库初始化失败:', e);
@@ -98,42 +98,36 @@ export async function initDatabase(db) {
 }
 
 export async function rebuildDatabase(db) {
-  console.log('开始执行数据库重建...');
+  debug('开始执行数据库重建...');
   
   try {
     await db.prepare(`DROP TABLE IF EXISTS metrics_history`).run();
-    console.log('✅ 已删除 metrics_history 表');
+    debug('✅ 已删除 metrics_history 表');
 
     await db.prepare(`DROP TABLE IF EXISTS metrics_history_old`).run();
-    console.log('✅ 已删除 metrics_history_old 表');
+    debug('✅ 已删除 metrics_history_old 表');
     
     await db.prepare(`DROP TABLE IF EXISTS servers`).run();
-    console.log('✅ 已删除 servers 表');
+    debug('✅ 已删除 servers 表');
     
     await db.prepare(`DROP TABLE IF EXISTS settings`).run();
-    console.log('✅ 已删除 settings 表');
+    debug('✅ 已删除 settings 表');
     
     dbInitialized = false;
     
     await initDatabase(db);
     
-    console.log('✅ 数据库重建完成');
+    debug('✅ 数据库重建完成');
     
     return {
       success: true,
-      message: {
-        en: 'Database rebuilt successfully',
-        zh: '数据库重建成功'
-      }
+      message: 'databaseRebuiltSuccess'
     };
   } catch (e) {
     console.error('❌ 数据库重建失败:', e);
     return {
       success: false,
-      message: {
-        en: 'Database rebuild failed',
-        zh: '数据库重建失败'
-      },
+      message: 'databaseRebuiltFailed',
       error: e.message
     };
   }
@@ -145,7 +139,7 @@ export async function getMetricsHistory(db, serverId, hours, columns) {
   
   const cached = getMetricsHistoryCache(serverId, hours, columns);
   if (cached && now - cached.timestamp < cacheDuration) {
-    console.log(`[History] CACHE HIT: ${serverId}, hours: ${hours}`);
+    debug(`[History] CACHE HIT: ${serverId}, hours: ${hours}`);
     return cached.data;
   }
   
@@ -173,7 +167,7 @@ export async function getMetricsHistory(db, serverId, hours, columns) {
 
   const cutoff = now - queryHours * 60 * 60 * 1000;
 
-  console.log(
+  debug(
     '[History]',
     'server:', serverId,
     'hours:', hours,
@@ -204,7 +198,7 @@ export async function getMetricsHistory(db, serverId, hours, columns) {
   
   if (needOldTable && oldTableExists) {
     // 跨月查询，使用 UNION ALL
-    console.log('[History] 跨月查询，合并 metrics_history 和 metrics_history_old');
+    debug('[History] 跨月查询，合并 metrics_history 和 metrics_history_old');
     
     rawResult = await db.prepare(`
       WITH sampled AS (
@@ -264,7 +258,7 @@ export async function getMetricsHistory(db, serverId, hours, columns) {
   
   setMetricsHistoryCache(serverId, hours, columns, result);
 
-  console.log(`[History] FINAL: ${result.length}`);
+  debug(`[History] FINAL: ${result.length}`);
 
   return result;
 }
@@ -272,7 +266,7 @@ export async function getMetricsHistory(db, serverId, hours, columns) {
 export async function dropMetricsHistoryOld(db) {
   try {
     await db.prepare(`DROP TABLE IF EXISTS metrics_history_old`).run();
-    console.log('[Cleanup] 已删除 metrics_history_old 表');
+    debug('[Cleanup] 已删除 metrics_history_old 表');
     return { success: true };
   } catch (e) {
     console.error('[Cleanup] 删除 metrics_history_old 表失败:', e);
@@ -282,22 +276,14 @@ export async function dropMetricsHistoryOld(db) {
 
 export async function monthlyCleanup(db) {
   try {
-    console.log('[Cleanup] 开始执行表轮换操作...');
+    debug('[Cleanup] 开始执行表轮换操作...');
     
-    const siteOptionsResult = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('site_options').first();
-    const siteOptions = siteOptionsResult && siteOptionsResult.value && siteOptionsResult.value.length > 0 
-      ? JSON.parse(siteOptionsResult.value) 
-      : {};
-    siteOptions.cleanup_skip_count = '1';
-    await db.prepare(
-      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-    ).bind('site_options', JSON.stringify(siteOptions)).run();
-    console.log('cleanup_skip_count set to 1');
-    clearSiteSettingsCache();
+    await saveSiteOptions(db, { cleanup_skip_count: '1' });
+    debug('cleanup_skip_count set to 1');
     
     // 1. 删除旧的 metrics_history_old 表（如果存在）
     await db.prepare(`DROP TABLE IF EXISTS metrics_history_old`).run();
-    console.log('[Cleanup] 已删除旧的 metrics_history_old 表');
+    debug('[Cleanup] 已删除旧的 metrics_history_old 表');
     
     // 2. 将 metrics_history 重命名为 metrics_history_old
     const currentTable = await db.prepare(
@@ -306,14 +292,14 @@ export async function monthlyCleanup(db) {
     
     if (currentTable) {
       await db.prepare(`ALTER TABLE metrics_history RENAME TO metrics_history_old`).run();
-      console.log('[Cleanup] 已将 metrics_history 重命名为 metrics_history_old');
+      debug('[Cleanup] 已将 metrics_history 重命名为 metrics_history_old');
     }
     
     // 3. 重新初始化数据库以创建新的 metrics_history 表
     dbInitialized = false;
     await initDatabase(db);
 
-    console.log('[Cleanup] 已创建新的 metrics_history 表');
+    debug('[Cleanup] 已创建新的 metrics_history 表');
     
     return {
       success: true,
@@ -325,9 +311,12 @@ export async function monthlyCleanup(db) {
   }
 }
 
-export async function saveMetricsHistory(db, serverId, metrics, countryCode = '') {
+export async function saveMetricsHistory(db, serverId, metrics, regionCode = '', timestamp = null) {
   try {
-    const now = Date.now();
+    const rawTimestamp = Number(timestamp);
+    const now = Number.isFinite(rawTimestamp) && rawTimestamp > 0
+      ? (rawTimestamp < 10000000000 ? rawTimestamp * 1000 : rawTimestamp)
+      : Date.now();
     
     const parsePing = (val) => {
       if (val === '' || val === null || val === undefined) return null;
@@ -344,17 +333,17 @@ export async function saveMetricsHistory(db, serverId, metrics, countryCode = ''
     
     await db.prepare(`
       INSERT INTO metrics_history (
-        server_id, timestamp, cpu, ram, disk, load_avg,
+        server_id, timestamp, cpu, load_avg,
         net_in_speed, net_out_speed, net_rx, net_tx,
         processes, tcp_conn, udp_conn,
         ping_ct, ping_cu, ping_cm, ping_bd,
         loss_ct, loss_cu, loss_cm, loss_bd,
         ram_total, ram_used, swap_total, swap_used,
         disk_total, disk_used,
-        cpu_cores, cpu_info, gpu, gpu_info, arch, os, country, ip_v4, ip_v6, boot_time,
+        cpu_cores, cpu_info, gpu, gpu_info, arch, os, region, ip_v4, ip_v6, boot_time,
         net_rx_monthly, net_tx_monthly
       ) VALUES (
-        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?, ?,
@@ -368,8 +357,6 @@ export async function saveMetricsHistory(db, serverId, metrics, countryCode = ''
       serverId,
       now,
       parseFloat(metrics.cpu) || 0,
-      parseFloat(metrics.ram) || 0,
-      parseFloat(metrics.disk) || 0,
       metrics.load || metrics.load_avg || '0 0 0',
       parseFloat(metrics.net_in_speed) || 0,
       parseFloat(metrics.net_out_speed) || 0,
@@ -398,7 +385,7 @@ export async function saveMetricsHistory(db, serverId, metrics, countryCode = ''
       metrics.gpu_info || '',
       metrics.arch || '',
       metrics.os || '',
-      countryCode,
+      regionCode,
       metrics.ip_v4 || '0',
       metrics.ip_v6 || '0',
       metrics.boot_time || '',
@@ -406,6 +393,12 @@ export async function saveMetricsHistory(db, serverId, metrics, countryCode = ''
       parseFloat(metrics.net_tx_monthly) || 0
     ).run();
   } catch (e) {
+    // 检测是否是 "has no column" 错误，如果是则添加缺失字段
+    if (e.message && /has no column/i.test(e.message)) {
+      console.warn('检测到数据库字段缺失，尝试添加缺失字段...');
+      await addHistoryColumns(db);
+      return;
+    }
     console.error('保存历史数据失败:', e);
   }
 }

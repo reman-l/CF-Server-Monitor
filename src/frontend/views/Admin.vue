@@ -1,6 +1,15 @@
 <template>
   <div>
-    <div v-if="!isLoggedIn" id="login-overlay" class="login-overlay">
+    <div v-if="isRemoteMode" class="remote-mode-disabled">
+      <div class="disabled-container">
+        <div class="disabled-icon">🔒</div>
+        <h2 class="disabled-title">{{ trans.adminDisabled }}</h2>
+        <p class="disabled-desc">{{ trans.adminDisabledDesc }}</p>
+        <router-link to="/" class="btn btn-primary mt-4">← {{ trans.backToDashboard }}</router-link>
+      </div>
+    </div>
+    <div v-else>
+      <div v-if="!isLoggedIn" id="login-overlay" class="login-overlay">
       <div class="login-container">
         <div class="login-header">
           <div class="login-icon">🔐</div>
@@ -21,7 +30,7 @@
               </button>
             </div>
           </div>
-          <div v-if="turnstileEnabled && turnstileSiteKey" class="login-form-group">
+          <div v-if="(turnstileEnabled || turnstileLoginEnabled) && turnstileSiteKey" class="login-form-group">
             <div id="admin-turnstile-container"></div>
           </div>
           <div v-if="loginError" id="login-error" class="login-error">{{ loginError }}</div>
@@ -85,9 +94,11 @@
         </div>
 
         <div id="tab-servers" class="tab-content" :class="{ active: activeTab === 'servers' }">
-          <div class="alert alert-info">
-            <span class="alert-icon">[i]</span>
-            <span>{{ trans.clickToCopy }} <strong>📋</strong> {{ trans.installCommand }}。{{ trans.interval }}</span>
+          <div class="alert alert-info alert-stack">
+            <div class="alert-line">
+              <span class="alert-icon">[i]</span>
+              <span>{{ trans.clickToCopy }} <strong>📋</strong> {{ trans.installCommand }}</span>
+            </div>
           </div>
 
           <div class="toolbar">
@@ -137,11 +148,11 @@
                   <td class="table-center-cell"><input type="checkbox" class="server-checkbox" :value="server.id" v-model="selectedServers"></td>
                   <td>
                     <div class="server-info">
-                      <span v-if="server.country && server.country !== 'xx'">
-                        <img :src="'https://flagcdn.com/24x18/' + getFlagCountryCode(server.country) + '.png'" :alt="server.country" class="flag-img">
+                      <span v-if="server.region && server.region !== 'xx'">
+                        <img :src="'https://flagcdn.com/24x18/' + getFlagRegionCode(server.region) + '.png'" :alt="server.region" class="flag-img">
                       </span>
                       <span v-else>🏳️</span>
-                      <a :href="'/server/' + server.id" class="server-name-link">{{ server.name }}</a>
+                      <router-link :to="'/server/' + server.id" class="server-name-link">{{ server.name }}</router-link>
                     </div>
                   </td>
                   <td><span class="group-tag">{{ server.server_group || trans.default }}</span></td>
@@ -173,36 +184,40 @@
 
         <div id="tab-settings" class="tab-content" :class="{ active: activeTab === 'settings' }">
           <div class="settings-grid">
-            <div class="settings-section">
+            <div class="settings-section" v-if="currentOrigin === getApiBases()[0]">
               <div class="section-title"><span>▸</span> {{ trans.appearance }}</div>
 
-              <div class="form-group">
-                <label class="form-label">{{ trans.siteTitle }}</label>
-                <input type="text" v-model="settings.site_title" class="form-input" :placeholder="'Cloudflare Server Monitor'">
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">{{ trans.bgImage }}</label>
-                <div class="flex" style="gap:8px;">
-                  <input type="text" v-model="settings.custom_bg" class="form-input flex-1" placeholder="https://...">
-                  <div class="upload-btn-wrapper">
-                    <button class="btn btn-margin-0">📁 {{ trans.upload }}</button>
-                    <input type="file" accept="image/*" @change="uploadBg">
-                  </div>
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.siteTitle }}</label>
+                  <input type="text" v-model="settings.site_title" class="form-input" :placeholder="'Cloudflare Server Monitor'">
                 </div>
-                <img v-if="settings.custom_bg" :src="settings.custom_bg" class="bg-preview">
+
+                <div class="form-group  ">
+                  <label class="form-label">{{ trans.bgImage }}</label>
+                  <div class="flex" style="gap:8px;">
+                    <input type="text" v-model="settings.custom_bg" class="form-input flex-1" placeholder="https://...">
+                    <div class="upload-btn-wrapper">
+                      <button class="btn btn-margin-0">📁 {{ trans.upload }}</button>
+                      <input type="file" accept="image/*" @change="uploadBg">
+                    </div>
+                  </div>
+                  <img v-if="settings.custom_bg" :src="settings.custom_bg" class="bg-preview">
+                </div>
               </div>
 
-              <div class="form-group">
-                <label class="form-label">{{ trans.customHead }}</label>
-                <textarea v-model="settings.custom_head" class="form-textarea" rows="3" placeholder="<link rel='stylesheet' href='...'">
-                </textarea>
-              </div>
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.customHead }}</label>
+                  <textarea v-model="settings.custom_head" class="form-textarea" rows="3" placeholder="<link rel='stylesheet' href='...'">
+                  </textarea>
+                </div>
 
-              <div class="form-group">
-                <label class="form-label">{{ trans.customScript }}</label>
-                <textarea v-model="settings.custom_script" class="form-textarea" rows="4" placeholder="console.log('Hello');">
-                </textarea>
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.customScript }}</label>
+                  <textarea v-model="settings.custom_script" class="form-textarea" rows="4" placeholder="console.log('Hello');">
+                  </textarea>
+                </div>
               </div>
             </div>
 
@@ -210,32 +225,42 @@
               <div class="settings-section mb-5">
                 <div class="section-title"><span>▸</span> {{ trans.displayOptions }}</div>
 
-                <div class="checkbox-item">
-                  <input type="checkbox" id="cfg_is_public" v-model="settings.is_public">
-                  <label><b>{{ trans.publicAccess }}</b></label>
+                <div class="form-row">
+                  <div class="form-group flex-1 checkbox-item">
+                    <input type="checkbox" id="cfg_is_public" v-model="settings.is_public">
+                    <label><b>{{ trans.publicAccess }}</b></label>
+                  </div>
+
+                  <div class="form-group flex-1 checkbox-item">
+                    <input type="checkbox" id="cfg_show_price" v-model="settings.show_price">
+                    <label>{{ trans.showPrice }}</label>
+                  </div>
+
+                  <div class="form-group flex-1 checkbox-item">
+                    <input type="checkbox" id="cfg_show_expire" v-model="settings.show_expire">
+                    <label>{{ trans.showExpire }}</label>
+                  </div>
                 </div>
 
-                <div class="checkbox-item">
-                  <input type="checkbox" id="cfg_show_price" v-model="settings.show_price">
-                  <label>{{ trans.showPrice }}</label>
+
+                <div class="form-row">
+                  <div class="form-group flex-1 checkbox-item">
+                    <input type="checkbox" id="cfg_show_bw" v-model="settings.show_bw">
+                    <label>{{ trans.showBw }}</label>
+                  </div>
+
+                  <div class="form-group flex-1 checkbox-item">
+                    <input type="checkbox" id="cfg_show_tf" v-model="settings.show_tf">
+                    <label>{{ trans.showTf }}</label>
+                  </div>
+
+                  <div class="form-group flex-1 checkbox-item">
+                    <input type="checkbox" id="cfg_show_time" v-model="settings.show_time">
+                    <label>{{ trans.showTime }}</label>
+                  </div>
                 </div>
 
-                <div class="checkbox-item">
-                  <input type="checkbox" id="cfg_show_expire" v-model="settings.show_expire">
-                  <label>{{ trans.showExpire }}</label>
-                </div>
-
-                <div class="checkbox-item">
-                  <input type="checkbox" id="cfg_show_bw" v-model="settings.show_bw">
-                  <label>{{ trans.showBw }}</label>
-                </div>
-
-                <div class="checkbox-item">
-                  <input type="checkbox" id="cfg_show_tf" v-model="settings.show_tf">
-                  <label>{{ trans.showTf }}</label>
-                </div>
-
-                <div class="checkbox-item">
+                <div class="form-group checkbox-item">
                   <input type="checkbox" id="cfg_show_long_history" v-model="settings.show_long_history">
                   <label>{{ trans.showLongHistory }} <span class="text-muted text-sm">{{ trans.showLongHistoryTip }}</span></label>
                 </div>
@@ -243,32 +268,42 @@
 
               <div class="settings-section">
                 <div class="section-title"><span>▸</span> {{ trans.notifications }}</div>
+                <div class="form-row">
+                  <div class="form-group flex-1">
+                    <label class="form-label">{{ trans.offlineAlert }}</label>
+                    <select v-model="settings.tg_notify" class="form-select">
+                      <option value="false">[OFF] {{ trans.disabled }}</option>
+                      <option value="true">[ON] {{ trans.notifyOffline }}</option>
+                    </select>
+                  </div>
 
-                <div class="form-group">
-                  <label class="form-label">{{ trans.offlineAlert }}</label>
-                  <select v-model="settings.tg_notify" class="form-select">
-                    <option value="false">[OFF] {{ trans.disabled }}</option>
-                    <option value="true">[ON] {{ trans.notifyOffline }}</option>
-                  </select>
-                </div>
-
-                <div class="form-group">
-                  <label class="form-label">{{ trans.telegramToken }}</label>
-                  <div class="password-input-wrapper">
-                    <input :type="passwordVisible.tgBotToken ? 'text' : 'password'" name="tg_bot_token" autocomplete="off" v-model="settings.tg_bot_token" class="form-input" placeholder="Bot Token or Webhook URL">
-                    <button type="button" class="password-toggle" @click="togglePassword('tgBotToken')">
-                      {{ passwordVisible.tgBotToken ? '🙈' : '👁️' }}
-                    </button>
+                  <div class="form-group flex-1">
+                    <label class="form-label">{{ trans.expireReminder }}</label>
+                    <select v-model="settings.expire_reminder" class="form-select">
+                      <option value="false">[OFF] {{ trans.disabled }}</option>
+                      <option value="true">[ON] {{ trans.notifyExpire }}</option>
+                    </select>
                   </div>
                 </div>
+                <div class="form-row">
+                  <div class="form-group flex-1">
+                    <label class="form-label">{{ trans.telegramToken }}</label>
+                    <div class="password-input-wrapper">
+                      <input :type="passwordVisible.tgBotToken ? 'text' : 'password'" name="tg_bot_token" v-model="settings.tg_bot_token" class="form-input" placeholder="Bot Token or Webhook URL">
+                      <button type="button" class="password-toggle" @click="togglePassword('tgBotToken')">
+                        {{ passwordVisible.tgBotToken ? '🙈' : '👁️' }}
+                      </button>
+                    </div>
+                  </div>
 
-                <div class="form-group">
-                  <label class="form-label">{{ trans.chatId }}</label>
-                  <div class="password-input-wrapper">
-                    <input :type="passwordVisible.tgChatId ? 'text' : 'password'" name="tg_chat_id" autocomplete="off" v-model="settings.tg_chat_id" class="form-input" placeholder="Telegram Chat ID (optional for WeChat)">
-                    <button type="button" class="password-toggle" @click="togglePassword('tgChatId')">
-                      {{ passwordVisible.tgChatId ? '🙈' : '👁️' }}
-                    </button>
+                  <div class="form-group flex-1">
+                    <label class="form-label">{{ trans.chatId }}</label>
+                    <div class="password-input-wrapper">
+                      <input :type="passwordVisible.tgChatId ? 'text' : 'password'" name="tg_chat_id" autocomplete="off" v-model="settings.tg_chat_id" class="form-input" placeholder="Telegram Chat ID (optional for WeChat)">
+                      <button type="button" class="password-toggle" @click="togglePassword('tgChatId')">
+                        {{ passwordVisible.tgChatId ? '🙈' : '👁️' }}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -277,23 +312,39 @@
             <div class="settings-section">
               <div class="section-title"><span>▸</span> {{ trans.securitySettings }}</div>
 
-              <div class="checkbox-item">
-                <input type="checkbox" id="cfg_turnstile_enabled" v-model="settings.turnstile_enabled">
-                <label><b>{{ trans.enableTurnstile }}</b></label>
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <div class="checkbox-item">
+                    <input type="checkbox" id="cfg_turnstile_enabled" v-model="settings.turnstile_enabled">
+                    <label><b>{{ trans.enableTurnstile }}</b></label>
+                  </div>
+                  </div>
+                <div class="form-group flex-1">
+                  <div class="checkbox-item">
+                    <input type="checkbox" id="cfg_turnstile_login_enabled" v-model="settings.turnstile_login_enabled">
+                    <label>{{ trans.enableTurnstileLogin }}</label>
+                  </div>
+                  <p class="text-muted text-sm mt-1 mb-3">
+                    <span class="warning-icon">[i]</span>
+                    {{ trans.turnstileLoginTip }}
+                  </p>
+                </div>
               </div>
+              
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.turnstileSiteKey }}</label>
+                  <input type="text" name="turnstile_site_key" autocomplete="off" v-model="settings.turnstile_site_key" class="form-input" :placeholder="trans.turnstileSiteKeyPlaceholder">
+                </div>
 
-              <div class="form-group">
-                <label class="form-label">{{ trans.turnstileSiteKey }}</label>
-                <input type="text" name="turnstile_site_key" autocomplete="off" v-model="settings.turnstile_site_key" class="form-input" :placeholder="trans.turnstileSiteKeyPlaceholder">
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">{{ trans.turnstileSecretKey }}</label>
-                <div class="password-input-wrapper">
-                  <input :type="passwordVisible.turnstileSecret ? 'text' : 'password'" name="turnstile_secret_key" autocomplete="off" v-model="settings.turnstile_secret_key" class="form-input" :placeholder="trans.turnstileSecretKeyPlaceholder">
-                  <button type="button" class="password-toggle" @click="togglePassword('turnstileSecret')">
-                    {{ passwordVisible.turnstileSecret ? '🙈' : '👁️' }}
-                  </button>
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.turnstileSecretKey }}</label>
+                  <div class="password-input-wrapper">
+                    <input :type="passwordVisible.turnstileSecret ? 'text' : 'password'" name="turnstile_secret_key" autocomplete="off" v-model="settings.turnstile_secret_key" class="form-input" :placeholder="trans.turnstileSecretKeyPlaceholder">
+                    <button type="button" class="password-toggle" @click="togglePassword('turnstileSecret')">
+                      {{ passwordVisible.turnstileSecret ? '🙈' : '👁️' }}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -320,30 +371,36 @@
 
             <div class="settings-section">
               <div class="section-title"><span>▸</span> {{ trans.cloudflareSettings }}</div>
+              
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.cloudflareAccountId }}</label>
+                  <input type="text" name="cloudflare_account_id" autocomplete="off" v-model="settings.cloudflare_account_id" class="form-input" :placeholder="trans.cloudflareAccountIdPlaceholder">
+                </div>
 
-              <div class="form-group">
-                <label class="form-label">{{ trans.cloudflareAccountId }}</label>
-                <input type="text" name="cloudflare_account_id" autocomplete="off" v-model="settings.cloudflare_account_id" class="form-input" :placeholder="trans.cloudflareAccountIdPlaceholder">
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Cloudflare API Token</label>
-                <div class="password-input-wrapper">
-                  <input :type="passwordVisible.cloudflareToken ? 'text' : 'password'" name="cloudflare_token" autocomplete="off" v-model="settings.cloudflare_token" class="form-input" :placeholder="trans.cloudflareTokenPlaceholder">
-                  <button type="button" class="password-toggle" @click="togglePassword('cloudflareToken')">
-                    {{ passwordVisible.cloudflareToken ? '🙈' : '👁️' }}
-                  </button>
+                <div class="form-group flex-1">
+                  <label class="form-label">Cloudflare API Token</label>
+                  <div class="password-input-wrapper">
+                    <input :type="passwordVisible.cloudflareToken ? 'text' : 'password'" name="cloudflare_token" autocomplete="off" v-model="settings.cloudflare_token" class="form-input" :placeholder="trans.cloudflareTokenPlaceholder">
+                    <button type="button" class="password-toggle" @click="togglePassword('cloudflareToken')">
+                      {{ passwordVisible.cloudflareToken ? '🙈' : '👁️' }}
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <p class="text-muted text-sm mt-2">
-                <span class="warning-icon">[i]</span> 
-                {{ trans.cloudflareTokenTip }}
-              </p>
-
-              <div class="form-group mt-4">
-                <button @click="queryD1Usage" class="btn btn-primary btn-lg" :disabled="d1UsageLoading">{{ d1UsageLoading ? '⏳' : '🔍' }} {{ trans.queryD1Quota }}</button>
+              <div class="form-row">
+                <div class="form-group  flex-1">
+                  <button @click="queryD1Usage" class="btn btn-primary btn-lg" :disabled="d1UsageLoading">{{ d1UsageLoading ? '⏳' : '🔍' }} {{ trans.queryD1Quota }}</button>
+                </div>
+                <div class="form-group  flex-1">
+                  <p class="text-muted text-sm mt-2">
+                    <span class="warning-icon">[i]</span> 
+                    {{ trans.cloudflareTokenTip }}
+                  </p>
+                </div>
               </div>
+
             </div>
 
             <div class="settings-section">
@@ -354,23 +411,25 @@
                 <input type="text" name="admin_username" autocomplete="username" v-model="settings.username" class="form-input" :placeholder="trans.usernamePlaceholder">
               </div>
 
-              <div class="form-group">
-                <label class="form-label">{{ trans.password }}</label>
-                <div class="password-input-wrapper">
-                  <input :type="passwordVisible.password ? 'text' : 'password'" name="admin_password" autocomplete="new-password" v-model="settings.password" class="form-input" placeholder="••••••••">
-                  <button type="button" class="password-toggle" @click="togglePassword('password')">
-                    {{ passwordVisible.password ? '🙈' : '👁️' }}
-                  </button>
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.password }}</label>
+                  <div class="password-input-wrapper">
+                    <input :type="passwordVisible.password ? 'text' : 'password'" name="admin_password" autocomplete="new-password" v-model="settings.password" class="form-input" placeholder="••••••••">
+                    <button type="button" class="password-toggle" @click="togglePassword('password')">
+                      {{ passwordVisible.password ? '🙈' : '👁️' }}
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div class="form-group">
-                <label class="form-label">{{ trans.confirmPassword }}</label>
-                <div class="password-input-wrapper">
-                  <input :type="passwordVisible.confirmPassword ? 'text' : 'password'" name="admin_confirm_password" autocomplete="new-password" v-model="settings.confirm_password" class="form-input" placeholder="••••••••">
-                  <button type="button" class="password-toggle" @click="togglePassword('confirmPassword')">
-                    {{ passwordVisible.confirmPassword ? '🙈' : '👁️' }}
-                  </button>
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.confirmPassword }}</label>
+                  <div class="password-input-wrapper">
+                    <input :type="passwordVisible.confirmPassword ? 'text' : 'password'" name="admin_confirm_password" autocomplete="new-password" v-model="settings.confirm_password" class="form-input" placeholder="••••••••">
+                    <button type="button" class="password-toggle" @click="togglePassword('confirmPassword')">
+                      {{ passwordVisible.confirmPassword ? '🙈' : '👁️' }}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -383,24 +442,27 @@
             <div class="settings-section">
               <div class="section-title"><span>▸</span> {{ trans.pingNodes }}</div>
               
-              <div class="form-group">
-                <label class="form-label">{{ trans.customCt }}</label>
-                <input type="text" v-model="settings.custom_ct" class="form-input" placeholder="gd-ct-dualstack.ip.zstaticcdn.com">
-              </div>
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.customCt }}</label>
+                  <input type="text" v-model="settings.custom_ct" class="form-input" placeholder="gd-ct-dualstack.ip.zstaticcdn.com">
+                </div>
 
-              <div class="form-group">
-                <label class="form-label">{{ trans.customCu }}</label>
-                <input type="text" v-model="settings.custom_cu" class="form-input" placeholder="gd-cu-dualstack.ip.zstaticcdn.com">
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.customCu }}</label>
+                  <input type="text" v-model="settings.custom_cu" class="form-input" placeholder="gd-cu-dualstack.ip.zstaticcdn.com">
+                </div>
               </div>
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.customCm }}</label>
+                  <input type="text" v-model="settings.custom_cm" class="form-input" placeholder="gd-cm-dualstack.ip.zstaticcdn.com">
+                </div>
 
-              <div class="form-group">
-                <label class="form-label">{{ trans.customCm }}</label>
-                <input type="text" v-model="settings.custom_cm" class="form-input" placeholder="gd-cm-dualstack.ip.zstaticcdn.com">
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">{{ trans.customBd }}</label>
-                <input type="text" v-model="settings.custom_bd" class="form-input" placeholder="lf3-ips.zstaticcdn.com">
+                <div class="form-group flex-1">
+                  <label class="form-label">{{ trans.customBd }}</label>
+                  <input type="text" v-model="settings.custom_bd" class="form-input" placeholder="lf3-ips.zstaticcdn.com">
+                </div>
               </div>
             </div>
           </div>
@@ -485,12 +547,23 @@
             <div class="form-group flex-1">
               <label class="form-label">{{ trans.trafficResetDay }}</label>
               <select ref="editResetDayRef" name="edit_reset_day" v-model="editForm.reset_day" class="form-select">
+                <option :value="0">0</option>
                 <option v-for="day in 31" :key="day" :value="day">{{ day }}</option>
               </select>
             </div>
           </div>
 
           <div class="form-row">
+            <div class="form-group flex-1">
+              <label class="form-label">{{ trans.collectInterval }}</label>
+              <select v-model="editForm.collect_interval" class="form-select">
+                <option :value="0">0</option>
+                <option :value="1">1</option>
+                <option :value="2">2</option>
+                <option :value="5">5</option>
+                <option :value="10">10</option>
+              </select>
+            </div>
             <div class="form-group flex-1">
               <label class="form-label">{{ trans.reportInterval }}</label>
               <select v-model="editForm.report_interval" class="form-select">
@@ -509,9 +582,9 @@
             </div>
           </div>
           <div class="text-muted text-sm mb-3">
+            <span class="warning-icon">[i]</span> {{ trans.collectIntervalHint }}<br>
             <span class="warning-icon">[i]</span> {{ trans.trafficResetDayTip }}
           </div>
-
           <div class="form-group">
             <div class="checkbox-item no-margin">
               <input type="checkbox" v-model="editForm.is_hidden">
@@ -607,21 +680,27 @@
 
           <div class="form-row">
             <div class="form-group flex-1">
+              <label class="form-label">{{ trans.collectInterval }}</label>
+              <div class="flex items-center gap-2">
+                <input type="text" readonly :value="collectInterval" class="form-input">
+              </div>
+            </div>
+            <div class="form-group flex-1">
               <label class="form-label">{{ trans.reportInterval }}</label>
               <div class="flex items-center gap-2">
-                <input type="text" readonly :value="reportInterval" class="form-input" style="width: 100px; background-color: var(--bg-secondary);">
+                <input type="text" readonly :value="reportInterval" class="form-input">
               </div>
             </div>
             <div class="form-group flex-1">
               <label class="form-label">{{ trans.pingMode }}</label>
               <div class="flex items-center gap-2">
-                <input type="text" readonly :value="pingMode.toUpperCase()" class="form-input" style="width: 100px; background-color: var(--bg-secondary);">
+                <input type="text" readonly :value="pingMode.toUpperCase()" class="form-input">
               </div>
             </div>
             <div class="form-group flex-1">
               <label class="form-label">{{ trans.trafficResetDay }}</label>
               <div class="flex items-center gap-2">
-                <input type="text" readonly :value="resetDay" class="form-input" style="width: 100px; background-color: var(--bg-secondary);">
+                <input type="text" readonly :value="resetDay" class="form-input">
                 <button @click="openEditModalFromCopy" class="btn btn-icon btn-blue" :title="trans.edit">✏️</button>
               </div>
             </div>
@@ -687,7 +766,7 @@
               </span>
             </div>
             <div v-if="dbResult.error" class="text-red mt-2">
-              {{ dbResult.error }}
+              {{ getMessage(dbResult.error) }}
             </div>
           </div>
 
@@ -713,46 +792,75 @@
           </div>
 
           <div v-if="d1UsageResult.success" class="mb-4">
-            <div class="quota-progress-list">
-              <div class="quota-progress-item">
-                <div class="flex-justify-between text-sm mb-1">
-                  <span>{{ trans.d1RowsRead }}：{{ formatNumber(d1UsageResult.usage.rowsRead) }} / {{ formatNumber(d1UsageResult.usage.readLimit) }}</span>
-                  <span>{{ getUsagePercent(d1UsageResult.usage.rowsRead, d1UsageResult.usage.readLimit) }}%</span>
+            <div class="quota-section">
+              <div class="quota-section-title">{{ trans.todayUsage }}</div>
+              <div class="quota-progress-list">
+                <div class="quota-progress-item">
+                  <div class="flex-justify-between text-sm mb-1">
+                    <span>{{ trans.d1RowsRead }}：{{ formatNumber(d1UsageResult.usage.today.rowsRead) }} / {{ formatNumber(5000000) }}</span>
+                    <span>{{ getUsagePercent(d1UsageResult.usage.today.rowsRead, 5000000) }}%</span>
+                  </div>
+                  <div class="quota-progress-bar">
+                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.today.rowsRead, 5000000) + '%' }"></div>
+                  </div>
                 </div>
-                <div class="quota-progress-bar">
-                  <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.rowsRead, d1UsageResult.usage.readLimit) + '%' }"></div>
+                <div class="quota-progress-item">
+                  <div class="flex-justify-between text-sm mb-1">
+                    <span>{{ trans.d1RowsWritten }}：{{ formatNumber(d1UsageResult.usage.today.rowsWritten) }} / {{ formatNumber(100000) }}</span>
+                    <span>{{ getUsagePercent(d1UsageResult.usage.today.rowsWritten, 100000) }}%</span>
+                  </div>
+                  <div class="quota-progress-bar">
+                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.today.rowsWritten, 100000) + '%' }"></div>
+                  </div>
                 </div>
-              </div>
-
-              <div class="quota-progress-item">
-                <div class="flex-justify-between text-sm mb-1">
-                  <span>{{ trans.d1RowsWritten }}：{{ formatNumber(d1UsageResult.usage.rowsWritten) }} / {{ formatNumber(d1UsageResult.usage.writeLimit) }}</span>
-                  <span>{{ getUsagePercent(d1UsageResult.usage.rowsWritten, d1UsageResult.usage.writeLimit) }}%</span>
-                </div>
-                <div class="quota-progress-bar">
-                  <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.rowsWritten, d1UsageResult.usage.writeLimit) + '%' }"></div>
-                </div>
-              </div>
-
-              <div class="quota-progress-item">
-                <div class="flex-justify-between text-sm mb-1">
-                  <span>{{ trans.workersRequests }}：{{ formatNumber(d1UsageResult.usage.workersRequests) }} / {{ formatNumber(d1UsageResult.usage.workersRequestLimit) }}</span>
-                  <span>{{ getUsagePercent(d1UsageResult.usage.workersRequests, d1UsageResult.usage.workersRequestLimit) }}%</span>
-                </div>
-                <div class="quota-progress-bar">
-                  <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.workersRequests, d1UsageResult.usage.workersRequestLimit) + '%' }"></div>
+                <div class="quota-progress-item">
+                  <div class="flex-justify-between text-sm mb-1">
+                    <span>{{ trans.workersRequests }}：{{ formatNumber(d1UsageResult.usage.today.workersRequests) }} / {{ formatNumber(100000) }}</span>
+                    <span>{{ getUsagePercent(d1UsageResult.usage.today.workersRequests, 100000) }}%</span>
+                  </div>
+                  <div v-if="d1UsageResult.usage.today.workersRequests" class="quota-progress-bar">
+                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.today.workersRequests, 100000) + '%' }"></div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <p class="text-secondary text-sm line-height-1-6 mt-4">
-              {{ trans.d1UsageDate }}：{{ d1UsageResult.usage.date }} ({{ d1UsageResult.usage.timezone }})<br>
-              {{ trans.d1NextReset }}：{{ formatUtcDateTime(d1UsageResult.usage.nextResetAt) }} ({{ d1UsageResult.usage.timezone }})
-            </p>
+            <div class="quota-section mt-4">
+              <div class="quota-section-title">{{ trans.last24HoursUsage }}</div>
+              <div class="quota-progress-list">
+                <div class="quota-progress-item">
+                  <div class="flex-justify-between text-sm mb-1">
+                    <span>{{ trans.d1RowsRead }}：{{ formatNumber(d1UsageResult.usage.last24Hours.rowsRead) }} / {{ formatNumber(5000000) }}</span>
+                    <span>{{ getUsagePercent(d1UsageResult.usage.last24Hours.rowsRead, 5000000) }}%</span>
+                  </div>
+                  <div class="quota-progress-bar">
+                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.last24Hours.rowsRead, 5000000) + '%' }"></div>
+                  </div>
+                </div>
+                <div class="quota-progress-item">
+                  <div class="flex-justify-between text-sm mb-1">
+                    <span>{{ trans.d1RowsWritten }}：{{ formatNumber(d1UsageResult.usage.last24Hours.rowsWritten) }} / {{ formatNumber(100000) }}</span>
+                    <span>{{ getUsagePercent(d1UsageResult.usage.last24Hours.rowsWritten, 100000) }}%</span>
+                  </div>
+                  <div class="quota-progress-bar">
+                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.last24Hours.rowsWritten, 100000) + '%' }"></div>
+                  </div>
+                </div>
+                <div v-if="d1UsageResult.usage.last24Hours.workersRequests" class="quota-progress-item">
+                  <div class="flex-justify-between text-sm mb-1">
+                    <span>{{ trans.workersRequests }}：{{ formatNumber(d1UsageResult.usage.last24Hours.workersRequests) }} / {{ formatNumber(100000) }}</span>
+                    <span>{{ getUsagePercent(d1UsageResult.usage.last24Hours.workersRequests, 100000) }}%</span>
+                  </div>
+                  <div class="quota-progress-bar">
+                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.last24Hours.workersRequests, 100000) + '%' }"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div v-else class="danger-box mb-4">
-            {{ d1UsageResult.error }}
+            {{ getMessage(d1UsageResult.error) }}
           </div>
 
           <div class="modal-footer flex-justify-end">
@@ -761,7 +869,28 @@
         </div>
       </div>
 
+      <div v-if="validationError" id="validationErrorModal" class="modal-overlay active">
+        <div class="modal-dialog">
+          <div class="modal-header">
+            <div class="modal-title">$ {{ trans.validationError }}</div>
+            <button class="modal-close" @click="validationError = null">✕</button>
+          </div>
+
+          <div class="danger-box mb-4">
+            <div class="flex-center-gap-sm">
+              <span class="danger-icon text-xl">⚠️</span>
+              <span class="danger-label">{{ validationError }}</span>
+            </div>
+          </div>
+
+          <div class="modal-footer flex-justify-end">
+            <button @click="validationError = null" class="btn">{{ trans.close }}</button>
+          </div>
+        </div>
+      </div>
+
       <Footer />
+    </div>
     </div>
   </div>
 </template>
@@ -770,18 +899,17 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import TerminalHeader from '../components/TerminalHeader.vue'
 import Footer from '../components/Footer.vue'
-import { adminApi, login, logout as apiLogout, formatBytes, upgradeDatabase, rebuildDatabase, getFlagCountryCode } from '../utils/api'
+import { adminApi, login, logout as apiLogout, formatBytes, upgradeDatabase, rebuildDatabase, getFlagRegionCode, getApiBases } from '../utils/api'
 import { t, currentLang } from '../utils/i18n'
 import { translations } from '../utils/i18n'
-
-const API_BASE = window.location.origin
+import { http } from '../utils/http'
 
 const trans = computed(() => translations[currentLang.value] || translations.en)
 
 const getMessage = (msg) => {
-  if (typeof msg === 'string') return msg
-  if (typeof msg === 'object' && msg !== null) {
-    return msg[currentLang.value] || msg.en || Object.values(msg)[0] || ''
+  if (typeof msg === 'string') {
+    const translated = t(msg)
+    return translated !== msg ? translated : msg
   }
   return ''
 }
@@ -793,11 +921,18 @@ const getUsagePercent = (used, limit) => {
   return Math.min(100, Number(((Number(used || 0) / Number(limit)) * 100).toFixed(2)))
 }
 
+const currentOrigin = computed(() => window.location.origin)
+
+const isRemoteMode = computed(() => {
+  return getApiBases().length > 1
+})
+
 const isLoggedIn = ref(false)
 const loginForm = ref({ username: '', password: '' })
 const loginError = ref('')
 const loginLoading = ref(false)
 const turnstileEnabled = ref(false)
+const turnstileLoginEnabled = ref(false)
 const turnstileSiteKey = ref('')
 const turnstileToken = ref('')
 const activeTab = ref('servers')
@@ -818,8 +953,10 @@ const settings = ref({
   show_expire: true,
   show_bw: true,
   show_tf: true,
+  show_time: true,
   show_long_history: false,
   tg_notify: 'false',
+  expire_reminder: 'false',
   tg_bot_token: '',
   tg_chat_id: '',
   turnstile_enabled: false,
@@ -866,6 +1003,7 @@ const editForm = ref({
   traffic_limit: '',
   traffic_calc_type: 'total',
   reset_day: 1,
+  collect_interval: 0,
   report_interval: 60,
   ping_mode: 'http',
   is_hidden: false
@@ -884,10 +1022,12 @@ const dbLoading = ref(false)
 const dbResult = ref(null)
 const d1UsageLoading = ref(false)
 const d1UsageResult = ref(null)
+const validationError = ref(null)
 
 const showCopyModal = ref(false)
 const copyServerId = ref('')
 const targetOs = ref('linux')
+const collectInterval = ref(0)
 const reportInterval = ref(60)
 const pingMode = ref('http')
 const customCt = ref('')
@@ -904,14 +1044,14 @@ const handleLogin = async () => {
     loginError.value = ''
     loginLoading.value = true
     
-    if (turnstileEnabled.value && !turnstileToken.value) {
+    if ((turnstileEnabled.value || turnstileLoginEnabled.value) && !turnstileToken.value) {
       loginError.value = 'Please complete the verification'
       loginLoading.value = false
       return
     }
     
-    const res = await login(loginForm.value.username, loginForm.value.password, turnstileToken.value)
-    if (res.ok) {
+    const result = await login(loginForm.value.username, loginForm.value.password, turnstileToken.value)
+    if (!result.error) {
       isLoggedIn.value = true
       if (turnstileToken.value) {
         localStorage.setItem('turnstile_token', turnstileToken.value)
@@ -961,13 +1101,14 @@ const initAdmin = async () => {
 
 const loadTurnstileConfig = async () => {
   try {
-    const res = await fetch(`${API_BASE}/api/config`)
-    if (res.ok) {
-      const config = await res.json()
+    const result = await http.get('/api/config', { includeAuth: false, includeTurnstile: false })
+    if (!result.error) {
+      const config = result.data
       turnstileEnabled.value = config.turnstile_enabled === true || config.turnstile_enabled === 'true'
+      turnstileLoginEnabled.value = config.turnstile_login_enabled === true || config.turnstile_login_enabled === 'true'
       turnstileSiteKey.value = config.turnstile_site_key || ''
       
-      if (turnstileEnabled.value && turnstileSiteKey.value) {
+      if ((turnstileEnabled.value || turnstileLoginEnabled.value) && turnstileSiteKey.value) {
         await loadTurnstileScript()
         renderTurnstile()
       }
@@ -1010,9 +1151,9 @@ const renderTurnstile = () => {
 
 const loadSettings = async () => {
   try {
-    const res = await adminApi({ action: 'get_settings' })
-    if (res.ok) {
-      const data = await res.json()
+    const result = await adminApi({ action: 'get_settings' })
+    if (!result.error) {
+      const data = result.data
       const settingsData = data.settings || {}
       settings.value = {
         site_title: settingsData.site_title || '',
@@ -1024,11 +1165,14 @@ const loadSettings = async () => {
         show_expire: settingsData.show_expire === 'true',
         show_bw: settingsData.show_bw === 'true',
         show_tf: settingsData.show_tf === 'true',
+        show_time: settingsData.show_time === 'true',
         show_long_history: settingsData.show_long_history === 'true',
         tg_notify: settingsData.tg_notify || 'false',
+        expire_reminder: settingsData.expire_reminder || 'false',
         tg_bot_token: settingsData.tg_bot_token || '',
         tg_chat_id: settingsData.tg_chat_id || '',
         turnstile_enabled: settingsData.turnstile_enabled === 'true',
+        turnstile_login_enabled: settingsData.turnstile_login_enabled === 'true',
         turnstile_site_key: settingsData.turnstile_site_key || '',
         turnstile_secret_key: settingsData.turnstile_secret_key || '',
         cloudflare_account_id: settingsData.cloudflare_account_id || '',
@@ -1053,24 +1197,44 @@ const saveSettings = async () => {
 
     const jwtSecret = settings.value.jwt_secret
     if (jwtSecret && jwtSecret.length > 0 && jwtSecret.length < 32) {
-      alert(trans.jwtSecretMinLength)
+      validationError.value = trans.value.jwtSecretMinLength
       return
     }
 
     if (jwtSecret && /\s/.test(jwtSecret)) {
-      alert(trans.jwtSecretNoWhitespace)
+      validationError.value = trans.value.jwtSecretNoWhitespace
       return
     }
 
     if (!settings.value.username || settings.value.username.trim().length === 0) {
-      alert(trans.value.usernameRequired)
+      validationError.value = trans.value.usernameRequired
       return
     }
 
     // 只有当用户输入了新密码时才验证密码确认
     if (settings.value.password && settings.value.password.length > 0) {
       if (settings.value.password !== settings.value.confirm_password) {
-        alert(trans.value.passwordMismatch)
+        validationError.value = trans.value.passwordMismatch
+        return
+      }
+    }
+
+    // 如果 turnstile_enabled 或 turnstile_login_enabled 开启，验证 turnstile_site_key 和 turnstile_secret_key 都不为空
+    if (settings.value.turnstile_enabled || settings.value.turnstile_login_enabled) {
+      if (!settings.value.turnstile_site_key || settings.value.turnstile_site_key.trim().length === 0) {
+        validationError.value = trans.value.turnstileSiteKeyRequired
+        return
+      }
+      if (!settings.value.turnstile_secret_key || settings.value.turnstile_secret_key.trim().length === 0) {
+        validationError.value = trans.value.turnstileSecretKeyRequired
+        return
+      }
+    }
+
+    // 如果 tg_notify 或 expire_reminder 开启，验证 tg_bot_token 不为空
+    if (settings.value.tg_notify === 'true' || settings.value.expire_reminder === 'true') {
+      if (!settings.value.tg_bot_token || settings.value.tg_bot_token.trim().length === 0) {
+        validationError.value = trans.value.tgBotTokenRequired
         return
       }
     }
@@ -1089,11 +1253,14 @@ const saveSettings = async () => {
         show_expire: settings.value.show_expire ? 'true' : 'false',
         show_bw: settings.value.show_bw ? 'true' : 'false',
         show_tf: settings.value.show_tf ? 'true' : 'false',
+        show_time: settings.value.show_time ? 'true' : 'false',
         show_long_history: settings.value.show_long_history ? 'true' : 'false',
         tg_notify: settings.value.tg_notify,
+        expire_reminder: settings.value.expire_reminder,
         tg_bot_token: settings.value.tg_bot_token,
         tg_chat_id: settings.value.tg_chat_id,
         turnstile_enabled: settings.value.turnstile_enabled ? 'true' : 'false',
+        turnstile_login_enabled: settings.value.turnstile_login_enabled ? 'true' : 'false',
         turnstile_site_key: settings.value.turnstile_site_key,
         turnstile_secret_key: settings.value.turnstile_secret_key,
         cloudflare_account_id: settings.value.cloudflare_account_id,
@@ -1113,13 +1280,12 @@ const saveSettings = async () => {
     }
 
     try {
-      const res = await adminApi(data)
-      const result = await res.json()
-      if (res.ok) {
-        alert(getMessage(result.message) || 'Success')
+      const result = await adminApi(data)
+      if (!result.error) {
+        alert(getMessage(result.data.message) || 'Success')
         location.reload()
       } else {
-        alert(result.error || 'Fail')
+        alert(getMessage(result.error) || 'Fail')
       }
     } catch (e) {
       alert('Fail: ' + e.message)
@@ -1130,9 +1296,9 @@ const saveSettings = async () => {
 
   const loadServers = async () => {
     try {
-      const res = await adminApi({ action: 'list' })
-      if (res.ok) {
-        const data = await res.json()
+      const result = await adminApi({ action: 'list' })
+      if (!result.error) {
+        const data = result.data
         servers.value = data.servers || []
         stats.value = data.stats || { total: servers.value.length, online: 0, offline: servers.value.length, avg_cpu: 0 }
         
@@ -1149,13 +1315,12 @@ const addServer = async () => {
     if (!name) return alert(trans.value.enterServerName)
 
     try {
-      const res = await adminApi({ action: 'add', name, server_group: newServerGroup.value })
-      const result = await res.json()
-      if (res.ok) {
-        alert(getMessage(result.message) || 'Success')
+      const result = await adminApi({ action: 'add', name, server_group: newServerGroup.value })
+      if (!result.error) {
+        alert(getMessage(result.data.message) || 'Success')
         location.reload()
       } else {
-        alert(result.error || 'Fail')
+        alert(getMessage(result.error) || 'Fail')
       }
     } catch (e) {
       alert('Fail: ' + e.message)
@@ -1163,25 +1328,26 @@ const addServer = async () => {
   }
 
 const getInstallCommand = (serverId) => {
-  const HOST = API_BASE
+  const HOST = getApiBases()[0]
   return `curl -sL ${HOST}/install.sh | bash -s install -id=${serverId} -secret='${apiSecret.value}' -url=${HOST}/update`
 }
 
 const getUninstallCommand = () => {
-  return `curl -sL ${API_BASE}/install.sh | bash -s uninstall`
+  return `curl -sL ${getApiBases()[0]}/install.sh | bash -s uninstall`
 }
 
 const copyCmd = (serverId) => {
   const server = servers.value.find(s => s.id === serverId)
   copyServerId.value = serverId
   targetOs.value = 'linux'
+  collectInterval.value = server?.collect_interval ?? 0
   reportInterval.value = server?.report_interval || 60
   pingMode.value = server?.ping_mode || 'http'
   customCt.value = settings.value.custom_ct
   customCu.value = settings.value.custom_cu
   customCm.value = settings.value.custom_cm
   customBd.value = settings.value.custom_bd
-  resetDay.value = server?.reset_day || 1
+  resetDay.value = server?.reset_day ?? 1
   rxCorrection.value = ''
   txCorrection.value = ''
   trafficCalcType.value = server?.traffic_calc_type || 'total'
@@ -1190,7 +1356,7 @@ const copyCmd = (serverId) => {
 }
 
 const getCustomInstallCommand = () => {
-  const HOST = API_BASE
+  const HOST = getApiBases()[0]
   if (targetOs.value === 'windows') {
     return `${HOST}/cf-server-monitor.pyw`
   }
@@ -1198,7 +1364,7 @@ const getCustomInstallCommand = () => {
   const script = targetOs.value === 'alpine' ? 'install-alpine.sh'
     : targetOs.value === 'openwrt' ? 'install-openwrt.sh'
     : 'install.sh'
-  let cmd = `curl -sL ${HOST}/${script} | ${shell} -s install -id=${copyServerId.value} -secret='${apiSecret.value}' -url=${HOST}/update -interval=${reportInterval.value} -ping=${pingMode.value} -reset_day=${resetDay.value || 1}`
+  let cmd = `curl -sL ${HOST}/${script} | ${shell} -s install -id=${copyServerId.value} -secret='${apiSecret.value}' -url=${HOST}/update -collect_interval=${collectInterval.value} -interval=${reportInterval.value} -ping=${pingMode.value} -reset_day=${resetDay.value ?? 1}`
   if (customCt.value) cmd += ` -ct=${customCt.value}`
   if (customCu.value) cmd += ` -cu=${customCu.value}`
   if (customCm.value) cmd += ` -cm=${customCm.value}`
@@ -1261,7 +1427,8 @@ const openEditModal = (server) => {
     bandwidth: server.bandwidth || '',
     traffic_limit: server.traffic_limit || '',
     traffic_calc_type: server.traffic_calc_type || 'total',
-    reset_day: server.reset_day || 1,
+    reset_day: server.reset_day ?? 1,
+    collect_interval: server.collect_interval ?? 0,
     report_interval: server.report_interval || 60,
     ping_mode: server.ping_mode || 'http',
     is_hidden: server.is_hidden === '1'
@@ -1285,16 +1452,16 @@ const saveEdit = async () => {
       traffic_limit: editForm.value.traffic_limit,
       traffic_calc_type: editForm.value.traffic_calc_type,
       reset_day: editForm.value.reset_day,
+      collect_interval: editForm.value.collect_interval,
       report_interval: editForm.value.report_interval,
       ping_mode: editForm.value.ping_mode,
       is_hidden: editForm.value.is_hidden ? '1' : '0'
     }
 
     try {
-      const res = await adminApi(data)
-      const result = await res.json()
-      if (res.ok) {
-        alert(getMessage(result.message) || 'Success')
+      const result = await adminApi(data)
+      if (!result.error) {
+        alert(getMessage(result.data.message) || 'Success')
         location.reload()
       } else {
         alert(getMessage(result.error) || 'Fail')
@@ -1315,13 +1482,12 @@ const saveEdit = async () => {
 
   const confirmDelete = async () => {
     try {
-      const res = await adminApi({ action: 'delete', id: deleteServerId.value })
-      const result = await res.json()
-      if (res.ok) {
-        alert(getMessage(result.message) || 'Success')
+      const result = await adminApi({ action: 'delete', id: deleteServerId.value })
+      if (!result.error) {
+        alert(getMessage(result.data.message) || 'Success')
         location.reload()
       } else {
-        alert(result.error || 'Fail')
+        alert(getMessage(result.error) || 'Fail')
       }
     } catch (e) {
       alert('Fail: ' + e.message)
@@ -1333,13 +1499,12 @@ const saveEdit = async () => {
     if (!confirm(trans.value.confirmDeleteServers + selectedServers.value.length + trans.value.irreversible)) return
 
     try {
-      const res = await adminApi({ action: 'batch_delete', ids: selectedServers.value })
-      const result = await res.json()
-      if (res.ok) {
-        alert(getMessage(result.message) || 'Success')
+      const result = await adminApi({ action: 'batch_delete', ids: selectedServers.value })
+      if (!result.error) {
+        alert(getMessage(result.data.message) || 'Success')
         location.reload()
       } else {
-        alert(result.error || 'Fail')
+        alert(getMessage(result.error) || 'Fail')
       }
     } catch (e) {
       alert('Fail: ' + e.message)
@@ -1388,8 +1553,8 @@ const getStatusText = (server) => {
     orders.splice(targetIndex, 0, dragged)
     
     try {
-      const res = await adminApi({ action: 'save_order', orders })
-      if (res.ok) {
+      const result = await adminApi({ action: 'save_order', orders })
+      if (!result.error) {
         loadServers()
       }
     } catch (e) {
@@ -1472,10 +1637,9 @@ const queryD1Usage = async () => {
   d1UsageResult.value = null
 
   try {
-    const res = await adminApi({ action: 'd1_usage' })
-    const result = await res.json()
-    if (res.ok) {
-      d1UsageResult.value = result
+    const result = await adminApi({ action: 'd1_usage' })
+    if (!result.error) {
+      d1UsageResult.value = result.data
     } else {
       d1UsageResult.value = { success: false, error: result.error || 'Fail' }
     }
