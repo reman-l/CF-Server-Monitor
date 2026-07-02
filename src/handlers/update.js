@@ -1,86 +1,135 @@
 import { saveMetricsHistory } from '../database/schema.js';
 import { checkServerExists } from '../utils/cache.js';
-import { createErrorResponse, createUnauthorizedResponse, createNotFoundResponse } from '../utils/errors.js';
+import { mergeMetricsIntoServer } from '../utils/metrics.js';
+import { createErrorResponse, createUnauthorizedResponse, createNotFoundResponse, createBadRequestResponse } from '../utils/errors.js';
 
 // 将最新一次上报打包成前端可直接消费的 "当前状态" 对象
 // 与 /api/server 和 /api/servers 返回的字段保持一致，便于页面直接合并
 function buildPayloadForBroadcast(id, metrics, extra = {}) {
-  const ts = metrics.timestamp || Date.now();
-  return {
-    id,
-    cpu: metrics.cpu ?? null,
-    ram: metrics.ram ?? null,
-    disk: metrics.disk ?? null,
-    load_avg: metrics.load ?? metrics.load_avg ?? '0 0 0',
-    net_in_speed: metrics.net_in_speed ?? null,
-    net_out_speed: metrics.net_out_speed ?? null,
-    net_rx: metrics.net_rx ?? null,
-    net_tx: metrics.net_tx ?? null,
-    net_rx_monthly: metrics.net_rx_monthly ?? null,
-    net_tx_monthly: metrics.net_tx_monthly ?? null,
-    processes: metrics.processes ?? null,
-    tcp_conn: metrics.tcp_conn ?? null,
-    udp_conn: metrics.udp_conn ?? null,
-    ping_ct: metrics.ping_ct ?? null,
-    ping_cu: metrics.ping_cu ?? null,
-    ping_cm: metrics.ping_cm ?? null,
-    ping_bd: metrics.ping_bd ?? null,
-    loss_ct: metrics.loss_ct ?? null,
-    loss_cu: metrics.loss_cu ?? null,
-    loss_cm: metrics.loss_cm ?? null,
-    loss_bd: metrics.loss_bd ?? null,
-    ram_total: metrics.ram_total ?? null,
-    ram_used: metrics.ram_used ?? null,
-    swap_total: metrics.swap_total ?? null,
-    swap_used: metrics.swap_used ?? null,
-    disk_total: metrics.disk_total ?? null,
-    disk_used: metrics.disk_used ?? null,
-    cpu_cores: metrics.cpu_cores ?? null,
-    cpu_info: metrics.cpu_info ?? '',
-    gpu: metrics.gpu ?? null,
-    gpu_info: metrics.gpu_info ?? '',
-    arch: metrics.arch ?? '',
-    os: metrics.os ?? '',
-    country: metrics.country || extra.country || '',
-    ip_v4: metrics.ip_v4 ?? '0',
-    ip_v6: metrics.ip_v6 ?? '0',
-    boot_time: metrics.boot_time ?? '',
-    last_updated: ts,
-    timestamp: ts
-  };
+  const payload = {};
+  mergeMetricsIntoServer(payload, metrics);
+  payload.id = id;
+  payload.region = extra.region || '';
+  payload.last_updated = extra.timestamp || metrics.timestamp || Date.now();
+  payload.timestamp = payload.last_updated;
+  return payload;
 }
 
-// 内部辅助：向 Durable Object 发送广播
-async function broadcastToDO(env, serverId, payload) {
-  if (!env || !env.METRICS_BROADCASTER) return false;
+// 批量推送：5秒窗口内合并向 DO 推送一次，减少请求次数
+const BATCH_WINDOW = 5000;
+const MAX_BATCH_SAMPLES = 300;
+let batchQueue = new Map();
+let flushingPromise = null;
+
+// 用于过滤不需要实时更新的字段
+const BROADCAST_DELETE_FIELDS = ['id', 'name', 'region', 'arch', 'os', 'cpu_info', 'cpu_cores', 'gpu_info', 'expire_date', 'server_group', 'traffic_limit', 'net_rx_monthly', 'net_tx_monthly', 'boot_time', 'timestamp', 'ip_v4', 'ip_v6'];
+
+function normalizeTimestamp(value, fallback = Date.now()) {
+  const ts = Number(value);
+  if (!Number.isFinite(ts) || ts <= 0) return fallback;
+  return ts < 10000000000 ? ts * 1000 : ts;
+}
+
+function normalizeMetricSamples(data) {
+  const now = Date.now();
+  const rawSamples = Array.isArray(data.samples)
+    ? data.samples
+    : (Array.isArray(data.batch) ? data.batch : []);
+
+  const samples = rawSamples.map(item => {
+    if (!item || typeof item !== 'object') return null;
+    const metrics = item.metrics || item.data || item.payload || item;
+    if (!metrics || typeof metrics !== 'object') return null;
+    const ts = normalizeTimestamp(item.ts ?? item.timestamp ?? metrics.timestamp, now);
+    return { ts, metrics };
+  }).filter(Boolean);
+
+  if (samples.length === 0 && data.metrics && typeof data.metrics === 'object') {
+    samples.push({
+      ts: normalizeTimestamp(data.metrics.timestamp, now),
+      metrics: data.metrics
+    });
+  }
+
+  samples.sort((a, b) => a.ts - b.ts);
+  return samples.slice(-MAX_BATCH_SAMPLES);
+}
+
+function toBroadcastSamples(id, samples, regionCode) {
+  return samples.map(sample => {
+    const payload = buildPayloadForBroadcast(id, sample.metrics || {}, {
+      region: regionCode,
+      timestamp: sample.ts
+    });
+    const filtered = Object.assign({}, payload);
+    BROADCAST_DELETE_FIELDS.forEach(field => delete filtered[field]);
+    return { ts: sample.ts, payload: filtered };
+  });
+}
+
+function queueBroadcastSamples(serverId, samples) {
+  if (!serverId || !Array.isArray(samples) || samples.length === 0) return;
+  const existing = batchQueue.get(serverId);
+  const merged = existing && Array.isArray(existing.samples)
+    ? existing.samples.concat(samples)
+    : samples;
+  batchQueue.set(serverId, { samples: merged.slice(-MAX_BATCH_SAMPLES) });
+}
+
+async function _flushBatch(env) {
+  flushingPromise = null;
+
+  if (batchQueue.size === 0) return;
+
+  // 原子性地取出当前队列，避免并发写入干扰
+  const queue = batchQueue;
+  batchQueue = new Map();
+
+  const updates = [];
+  for (const [serverId, item] of queue) {
+    if (item && Array.isArray(item.samples) && item.samples.length > 0) {
+      updates.push({ serverId, samples: item.samples });
+    } else if (item) {
+      const filtered = Object.assign({}, item);
+      BROADCAST_DELETE_FIELDS.forEach(field => delete filtered[field]);
+      updates.push({ serverId, payload: filtered });
+    }
+  }
+
+  if (updates.length === 0) return;
+
   try {
     const id = env.METRICS_BROADCASTER.idFromName('global');
     const stub = env.METRICS_BROADCASTER.get(id);
-    // 内部调用，不需要鉴权；即使失败也不影响 /update 返回
-    await stub.fetch(`http://internal/push/${encodeURIComponent(serverId)}`, {
+    await stub.fetch('http://internal/batch-push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ updates })
     });
-    return true;
   } catch (e) {
-    // 广播失败不应该让客户端收到错误
-    console.warn('[broadcast] DO push failed:', e.message || e);
-    return false;
+    console.warn('[broadcast] batch push failed:', e.message || e);
   }
+}
+
+function _ensureBatchFlush(env) {
+  if (flushingPromise) return flushingPromise;
+
+  flushingPromise = new Promise(resolve => setTimeout(resolve, BATCH_WINDOW))
+    .then(() => _flushBatch(env));
+
+  return flushingPromise;
 }
 
 export async function handleUpdate(request, env, ctx) {
   try {
     const data = await request.json();
-    const { id, secret, metrics } = data;
+    const { id, secret } = data;
 
     if (secret !== env.API_SECRET) {
       return createUnauthorizedResponse('Invalid secret');
     }
 
-    let countryCode = request.cf?.country || '';
-    const upperCode = countryCode.toUpperCase();
+    let regionCode = request.cf?.country || request.headers?.get('cf-ipcountry') || '';
 
     const serverExists = await checkServerExists(env.DB, id);
 
@@ -88,10 +137,18 @@ export async function handleUpdate(request, env, ctx) {
       return createNotFoundResponse('Server not found');
     }
 
-    await saveMetricsHistory(env.DB, id, metrics, countryCode);
+    const samples = normalizeMetricSamples(data);
+    if (samples.length === 0) {
+      return createBadRequestResponse('Missing metrics');
+    }
 
-    const payload = buildPayloadForBroadcast(id, metrics || {}, { country: countryCode });
-    ctx.waitUntil(broadcastToDO(env, id, payload));
+    const latestSample = samples[samples.length - 1];
+    await saveMetricsHistory(env.DB, id, latestSample.metrics, regionCode, latestSample.ts);
+
+    const broadcastSamples = toBroadcastSamples(id, samples, regionCode);
+    // 加入批量队列，由后台定时任务统一推送到 DO
+    queueBroadcastSamples(id, broadcastSamples);
+    ctx.waitUntil(_ensureBatchFlush(env));
 
     return new Response('OK', { status: 200 });
   } catch (e) {
@@ -109,15 +166,19 @@ export async function handleWebSocketUpgrade(request, env) {
   }
 
   const url = new URL(request.url);
-  // 透传 query 让 DO 读取 subscribe 参数
   const qs = url.search || '';
   try {
     const id = env.METRICS_BROADCASTER.idFromName('global');
     const stub = env.METRICS_BROADCASTER.get(id);
-    return await stub.fetch(`http://internal/ws${qs}`, {
+    const realOrigin = new URL(request.url).origin;
+    const headers = new Headers(request.headers);
+    headers.set('X-Real-Origin', realOrigin);
+    return await stub.fetch(new Request(`http://internal/ws${qs}`, {
       method: request.method,
-      headers: request.headers
-    });
+      headers,
+      body: request.body,
+      redirect: request.redirect
+    }));
   } catch (e) {
     console.error('[ws] DO upgrade failed:', e);
     return new Response(JSON.stringify({ error: 'WebSocket error', code: 500 }), {

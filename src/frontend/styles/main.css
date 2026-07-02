@@ -425,6 +425,12 @@ body::before {
     letter-spacing: 0.5px;
 }
 
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 .btn:hover {
     background: var(--bg-hover);
     border-color: var(--border-active);
@@ -728,6 +734,20 @@ body::before {
     transition: width 0.3s ease;
 }
 
+.quota-section {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 16px;
+}
+
+.quota-section-title {
+    font-weight: 600;
+    color: var(--accent-cyan);
+    margin-bottom: 12px;
+    font-size: 14px;
+}
+
 /* --------------------------------------------------------------------------
    12. Server Card Components
    -------------------------------------------------------------------------- */
@@ -883,6 +903,19 @@ body::before {
 
 .net-up {
     color: var(--accent-blue);
+}
+
+.stat-time-row {
+    margin-top: -1px;
+    margin-bottom: 0;
+}
+
+.stat-time-value {
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
 }
 
 /* --------------------------------------------------------------------------
@@ -1057,10 +1090,29 @@ body::before {
     color: var(--text-muted);
 }
 
+.admin-container {
+    position: relative;
+}
+
+.admin-loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(13, 17, 23, 0.72);
+    backdrop-filter: blur(2px);
+}
+
 .header-actions {
     display: flex;
     gap: 10px;
-    flex-wrap: wrap;
+}
+
+.admin-site-select {
+    width: min(320px, 42vw);
+    min-width: 180px;
 }
 
 .toolbar {
@@ -1218,6 +1270,17 @@ body::before {
     border-radius: 4px;
     margin-bottom: 16px;
     font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.alert-stack {
+    align-items: flex-start;
+    flex-direction: column;
+}
+
+.alert-line {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1811,6 +1874,7 @@ body::before {
 }
 
 .bg-preview {
+    max-width: 100%;
     max-height: 80px;
     border-radius: 4px;
     margin-top: 8px;
@@ -1898,105 +1962,95 @@ body::before {
     background: var(--border-active);
 }
 
+
 /* --------------------------------------------------------------------------
-   36. Responsive Styles
+   36. Remote Mode Disabled Styles
    -------------------------------------------------------------------------- */
-
-/* Tablet */
-@media (max-width: 1200px) {
-    .charts-container {
-        grid-template-columns: 1fr;
-    }
+.remote-mode-disabled {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--bg-primary);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
 }
 
-/* Mobile */
-@media (max-width: 768px) {
-    .container {
-        padding: 8px;
-    }
-
-    .btn, .tab-btn{
-        padding: 8px;
-    }
-
-    .terminal-dots{
-        gap: 3px;
-        width: auto;
-    }
-
-    .terminal-dot{
-        width: 6px;
-        height: 6px;
-    }
-
-    .terminal-title{
-        display: none;
-    }
-
-    .lang-toggle, .theme-toggle{
-        padding: 0;
-    }
-
-    .terminal-header-controls{
-        gap: 8px;
-    }
-
-    #map-container {
-        height: 260px;
-    }
-
-    .servers-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .global-stats {
-        grid-template-columns: 1fr;
-    }
-
-    .ping-panel {
-        grid-template-columns: repeat(2, 1fr);
-    }
-
-    .stats-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-
-    .toolbar-input {
-        width: 100%;
-    }
-
-    .sysinfo-grid {
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    }
-
-    .time-selector {
-        overflow-x: auto;
-        width: 100%;
-    }
-
-    .time-btn {
-        padding: 6px 10px;
-        font-size: 11px;
-    }
-
-    .host-card-header {
-        padding: 12px 14px;
-    }
-
-    .chart-body canvas {
-        height: 180px !important;
-    }
-
-    .settings-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .view-panel {
-        min-height: 0;
-    }
+.disabled-container {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-active);
+    border-radius: 6px;
+    padding: 40px;
+    max-width: 480px;
+    text-align: center;
+    animation: fadeIn 0.3s ease;
 }
 
+.disabled-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.8;
+}
 
+.disabled-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--accent-red);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.disabled-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 24px;
+}
+
+.site-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 24px;
+    text-align: left;
+}
+
+.site-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    text-decoration: none;
+    color: var(--accent-cyan);
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: 13px;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.site-item:hover {
+    border-color: var(--accent-cyan);
+    background: rgba(0, 212, 170, 0.05);
+}
+
+.site-index {
+    color: var(--text-muted);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.site-url {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 /* --------------------------------------------------------------------------
    37. Admin Login Styles
@@ -2614,4 +2668,137 @@ body::before {
 
 .checkbox-accent-green {
     accent-color: var(--accent-green);
+}
+
+
+/* --------------------------------------------------------------------------
+   36. Responsive Styles
+   -------------------------------------------------------------------------- */
+
+/* Tablet */
+@media (max-width: 1200px) {
+    .charts-container {
+        grid-template-columns: 1fr;
+    }
+
+    .settings-grid {
+        gap: 12px;
+    }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+    .container {
+        padding: 8px;
+    }
+
+    .btn, .tab-btn{
+        padding: 8px;
+    }
+
+    .terminal-dots{
+        gap: 3px;
+        width: auto;
+    }
+
+    .terminal-dot{
+        width: 6px;
+        height: 6px;
+    }
+
+    .terminal-title{
+        display: none;
+    }
+
+    .lang-toggle, .theme-toggle{
+        padding: 0;
+    }
+
+    .terminal-header-controls{
+        gap: 8px;
+    }
+
+    #map-container {
+        height: 260px;
+    }
+
+    .servers-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .global-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .ping-panel {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .toolbar-input {
+        width: 100%;
+    }
+
+    .sysinfo-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+
+    .time-selector {
+        overflow-x: auto;
+        width: 100%;
+    }
+
+    .time-btn {
+        padding: 6px 10px;
+        font-size: 11px;
+    }
+
+    .host-card-header {
+        padding: 12px 14px;
+    }
+
+    .chart-body canvas {
+        height: 180px !important;
+    }
+
+    .settings-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .settings-section {
+        margin-bottom: 12px;
+    }
+
+    .settings-grid .form-row {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .settings-section .flex[style*="gap"] {
+        flex-direction: column;
+    }
+
+    .settings-section .flex[style*="gap"] .form-input,
+    .settings-section .flex[style*="gap"] > * {
+        width: 100%;
+    }
+
+    .tab-content .text-right {
+        text-align: center;
+    }
+
+    .tab-content .text-right .btn {
+        width: 100%;
+    }
+
+    .view-panel {
+        min-height: 0;
+    }
+    .btn-lg {
+        font-size: 12px;
+        padding: 12px;
+    }
 }
